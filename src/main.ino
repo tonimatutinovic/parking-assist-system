@@ -10,6 +10,19 @@
 #define TX_PIN 10
 #define BUZZER_PIN 3
 
+// Distance zones for acoustic warning
+typedef enum
+{
+    ZONE_SAFE,
+    ZONE_SLOW,
+    ZONE_MEDIUM,
+    ZONE_FAST,
+    ZONE_CRITICAL
+} zone_t;
+
+// Current active zone
+zone_t currentZone = ZONE_SAFE;
+
 // Software UART for ultrasonic sensor communication
 SoftwareSerial sensorSerial(RX_PIN, TX_PIN);
 
@@ -133,6 +146,54 @@ float applyMovingAverage(float newValue)
     return sum / count;
 }
 
+/*
+  Updates zone based on distance using hysteresis
+  Prevents rapid switching between zones near boundaries
+  Parameters:
+    d: distance (cm),
+    current: current active zone
+  Returns: updated zone
+*/
+zone_t updateZone(float d, zone_t current)
+{
+
+    switch (current)
+    {
+    case ZONE_SAFE:
+        if (d < 95)
+            return ZONE_SLOW;
+        break;
+
+    case ZONE_SLOW:
+        if (d < 55)
+            return ZONE_MEDIUM;
+        if (d > 105)
+            return ZONE_SAFE;
+        break;
+
+    case ZONE_MEDIUM:
+        if (d < 35)
+            return ZONE_FAST;
+        if (d > 65)
+            return ZONE_SLOW;
+        break;
+
+    case ZONE_FAST:
+        if (d < 18)
+            return ZONE_CRITICAL;
+        if (d > 45)
+            return ZONE_MEDIUM;
+        break;
+
+    case ZONE_CRITICAL:
+        if (d > 22)
+            return ZONE_FAST;
+        break;
+    }
+
+    return current;
+}
+
 void setup()
 {
     // Serial communication for debugging (PC)
@@ -193,8 +254,28 @@ void loop()
                 Serial.print(distance);
                 Serial.println(" cm");
 
-                // Update buzzer behavior based on distance
-                setBuzzerInterval(distance);
+                // Update zone with hysteresis
+                currentZone = updateZone(distance, currentZone);
+
+                // Set buzzer behavior based on zone
+                switch (currentZone)
+                {
+                case ZONE_SAFE:
+                    buzzerInterval = 999999;
+                    break;
+                case ZONE_SLOW:
+                    buzzerInterval = 500;
+                    break;
+                case ZONE_MEDIUM:
+                    buzzerInterval = 200;
+                    break;
+                case ZONE_FAST:
+                    buzzerInterval = 80;
+                    break;
+                case ZONE_CRITICAL:
+                    buzzerInterval = 0;
+                    break;
+                }
             }
 
             // Reset buffer for next packet
