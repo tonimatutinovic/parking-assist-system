@@ -20,6 +20,7 @@ The system continuously measures the distance behind the vehicle and provides ac
 - Non-blocking timing using `millis()`
 - Packet validation using checksum
 - Timeout-based safety handling
+- Moving average filtering for stable distance measurement
 
 ---
 
@@ -122,7 +123,6 @@ distance = ((high_byte << 8) + low_byte) / 10
 
 ## Future Improvements
 
-- Moving average / median filtering  
 - Hysteresis for stable zone transitions  
 - Reverse gear activation input  
 - Sensor fault detection  

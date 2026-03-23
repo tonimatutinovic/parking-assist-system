@@ -5,7 +5,7 @@
   RX_PIN: Arduino receives data from sensor (connect sensor TX here)
   TX_PIN: Not used in this project (sensor transmits automatically)
   BUZZER_PIN: Output pin for buzzer
- */
+*/
 #define RX_PIN 11
 #define TX_PIN 10
 #define BUZZER_PIN 3
@@ -28,14 +28,14 @@ bool toneOn = false;              // Current buzzer state
 /*
   Timeout handling
   If no data is received from sensor within TIMEOUT, buzzer will be disabled for safety
- */
+*/
 const unsigned long TIMEOUT = 200; // milliseconds
 unsigned long lastPacketTime = 0;
 
 /*
   Maps distance (cm) to buzzer behavior
   Smaller distance -> faster beeping
- */
+*/
 void setBuzzerInterval(float d)
 {
     if (d < 20)
@@ -53,7 +53,7 @@ void setBuzzerInterval(float d)
 /*
   Updates buzzer state using non-blocking timing
   Uses millis() instead of delay() to keep system responsive
- */
+*/
 void updateBuzzer()
 {
 
@@ -95,6 +95,44 @@ void updateBuzzer()
     }
 }
 
+// Moving average filter
+#define FILTER_SIZE 5
+
+float filterBuffer[FILTER_SIZE] = {0};
+int filterIndex = 0;
+bool filterFilled = false;
+
+/*
+  Applies moving average filter to incoming distance values
+  Reduces noise and prevents rapid fluctuations in measurements
+  Parameters: newValue: latest raw distance measurement (cm)
+  Returns: filtered distance value (cm)
+*/
+float applyMovingAverage(float newValue)
+{
+    // Store new measurement
+    filterBuffer[filterIndex] = newValue;
+
+    // Move index forward using modulo
+    filterIndex = (filterIndex + 1) % FILTER_SIZE;
+
+    // Mark buffer as filled after first full cycle
+    if (filterIndex == 0)
+        filterFilled = true;
+
+    // Determine how many valid samples we currently have
+    int count = filterFilled ? FILTER_SIZE : filterIndex;
+
+    // Compute average of available samples
+    float sum = 0;
+    for (int i = 0; i < count; i++)
+    {
+        sum += filterBuffer[i];
+    }
+
+    return sum / count;
+}
+
 void setup()
 {
     // Serial communication for debugging (PC)
@@ -117,7 +155,7 @@ void loop()
       [1] = high byte of distance
       [2] = low byte of distance
       [3] = checksum
-     */
+    */
     while (sensorSerial.available())
     {
 
@@ -147,7 +185,8 @@ void loop()
                 // Combine high and low bytes into 16-bit distance value then convert to centimeters
                 float rawDistance = ((buffer[1] << 8) + buffer[2]) / 10.0;
 
-                distance = rawDistance;
+                // Apply filtering to stabilize measurement
+                distance = applyMovingAverage(rawDistance);
 
                 // Debug output to Serial Monitor
                 Serial.print("Distance: ");
