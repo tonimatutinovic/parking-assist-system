@@ -23,6 +23,7 @@ The system continuously measures the distance behind the vehicle and provides ac
 - Moving average filtering for stable distance measurement
 - Hysteresis-based distance zones for stable behavior
 - Active buzzer for acoustic warning (ON/OFF control)
+- Reverse activation simulated using push button input
 
 ---
 
@@ -76,6 +77,18 @@ The system operates in real time:
 
 ---
 
+## Control Logic
+
+The system is only active when reverse gear is engaged.
+
+For development and testing purposes, reverse activation is simulated using a push button input (active LOW).
+
+When reverse is not active:
+- Sensor data is ignored
+- Buzzer is disabled
+
+---
+
 ## Software Architecture
 
 The system is structured into three logical parts:
@@ -115,11 +128,13 @@ distance = ((high_byte << 8) + low_byte) / 10
 
 ## Current Status
 
-**V1 – Basic functionality implemented**
+**V2 – Reverse activation and improved control logic**
 
-- Distance measurement  
-- Buzzer feedback 
-- UART parsing 
+- Distance measurement 
+- Filtering
+- Hysteresis 
+- Active buzzer
+- Reverse activation
 
 ---
 

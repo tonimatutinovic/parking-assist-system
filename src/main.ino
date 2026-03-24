@@ -5,10 +5,12 @@
   RX_PIN: Arduino receives data from sensor (connect sensor TX here)
   TX_PIN: Not used in this project (sensor transmits automatically)
   BUZZER_PIN: Output pin for buzzer
+  REVERSE PIN: Simulates vehicle reverse gear activation using a push button
 */
 #define RX_PIN 11
 #define TX_PIN 10
 #define BUZZER_PIN 3
+#define REVERSE_PIN 2
 
 // Distance zones for acoustic warning
 typedef enum
@@ -193,13 +195,24 @@ void updateBuzzer()
 
 void setup()
 {
-    Serial.begin(115200);        // Serial communication for debugging (PC)
-    sensorSerial.begin(9600);    // Sensor UART communication (fixed at 9600 baud)
-    pinMode(BUZZER_PIN, OUTPUT); // Configure buzzer pin as output
+    Serial.begin(115200);               // Serial communication for debugging (PC)
+    sensorSerial.begin(9600);           // Sensor UART communication (fixed at 9600 baud)
+    pinMode(BUZZER_PIN, OUTPUT);        // Configure buzzer pin as output
+    pinMode(REVERSE_PIN, INPUT_PULLUP); // Configure reverse input with internal pull-up resistor
 }
 
 void loop()
 {
+    // Read reverse state (active LOW)
+    bool reverseActive = (digitalRead(REVERSE_PIN) == LOW);
+
+    // If reverse is OFF, disable system
+    if (!reverseActive)
+    {
+        digitalWrite(BUZZER_PIN, LOW);
+        buzzerState = false;
+        return;
+    }
     /*
       Read incoming UART data from sensor
       Sensor continuously sends 4-byte packets:
