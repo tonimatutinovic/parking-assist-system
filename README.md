@@ -22,6 +22,7 @@ The system continuously measures the distance behind the vehicle and provides ac
 - Timeout-based safety handling
 - Moving average filtering for stable distance measurement
 - Hysteresis-based distance zones for stable behavior
+- Active buzzer for acoustic warning (ON/OFF control)
 
 ---
 
@@ -29,7 +30,7 @@ The system continuously measures the distance behind the vehicle and provides ac
 
 - Arduino Nano
 - Waterproof ultrasonic sensor (A02YYUW / A0221AU)
-- Buzzer (passive)
+- Buzzer (active)
 - Breadboard and jumper wires
 
 ---
@@ -116,9 +117,9 @@ distance = ((high_byte << 8) + low_byte) / 10
 
 **V1 – Basic functionality implemented**
 
-- Distance measurement ✔  
-- Buzzer feedback ✔  
-- UART parsing ✔  
+- Distance measurement  
+- Buzzer feedback 
+- UART parsing 
 
 ---
 

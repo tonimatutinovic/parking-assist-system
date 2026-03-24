@@ -36,7 +36,7 @@ float distance = 0;
 // Buzzer control variables (non-blocking timing using millis)
 unsigned long lastToggle = 0;     // Last time buzzer state changed
 unsigned long buzzerInterval = 0; // Interval between ON/OFF toggles
-bool toneOn = false;              // Current buzzer state
+bool buzzerState = false;         // Current buzzer state
 
 /*
   Timeout handling
@@ -44,69 +44,6 @@ bool toneOn = false;              // Current buzzer state
 */
 const unsigned long TIMEOUT = 200; // milliseconds
 unsigned long lastPacketTime = 0;
-
-/*
-  Maps distance (cm) to buzzer behavior
-  Smaller distance -> faster beeping
-*/
-void setBuzzerInterval(float d)
-{
-    if (d < 20)
-        buzzerInterval = 0; // Continuous tone (very close)
-    else if (d < 40)
-        buzzerInterval = 80; // Fast beeping
-    else if (d < 60)
-        buzzerInterval = 200; // Medium speed
-    else if (d < 100)
-        buzzerInterval = 500; // Slow beeping
-    else
-        buzzerInterval = 999999; // No sound (safe distance)
-}
-
-/*
-  Updates buzzer state using non-blocking timing
-  Uses millis() instead of delay() to keep system responsive
-*/
-void updateBuzzer()
-{
-
-    // Disable buzzer if sensor data is outdated
-    if (millis() - lastPacketTime > TIMEOUT)
-    {
-        noTone(BUZZER_PIN);
-        return;
-    }
-
-    // Continuous tone for critical distance
-    if (buzzerInterval == 0)
-    {
-        tone(BUZZER_PIN, 2000); // 2 kHz tone
-        return;
-    }
-
-    // No sound zone
-    if (buzzerInterval >= 999999)
-    {
-        noTone(BUZZER_PIN);
-        return;
-    }
-
-    // Toggle buzzer ON/OFF based on interval
-    if (millis() - lastToggle >= buzzerInterval)
-    {
-        lastToggle = millis();
-        toneOn = !toneOn;
-
-        if (toneOn)
-        {
-            tone(BUZZER_PIN, 2000); // Turn sound ON
-        }
-        else
-        {
-            noTone(BUZZER_PIN); // Turn sound OFF
-        }
-    }
-}
 
 // Moving average filter
 #define FILTER_SIZE 5
@@ -123,11 +60,8 @@ bool filterFilled = false;
 */
 float applyMovingAverage(float newValue)
 {
-    // Store new measurement
-    filterBuffer[filterIndex] = newValue;
-
-    // Move index forward using modulo
-    filterIndex = (filterIndex + 1) % FILTER_SIZE;
+    filterBuffer[filterIndex] = newValue;          // Store new measurement
+    filterIndex = (filterIndex + 1) % FILTER_SIZE; // Move index forward using modulo
 
     // Mark buffer as filled after first full cycle
     if (filterIndex == 0)
@@ -156,7 +90,6 @@ float applyMovingAverage(float newValue)
 */
 zone_t updateZone(float d, zone_t current)
 {
-
     switch (current)
     {
     case ZONE_SAFE:
@@ -194,21 +127,79 @@ zone_t updateZone(float d, zone_t current)
     return current;
 }
 
+/*
+  Sets buzzer interval based on current warning zone
+*/
+void setBuzzerFromZone(zone_t zone)
+{
+    switch (zone)
+    {
+    case ZONE_SAFE:
+        buzzerInterval = 999999;
+        break;
+    case ZONE_SLOW:
+        buzzerInterval = 500;
+        break;
+    case ZONE_MEDIUM:
+        buzzerInterval = 200;
+        break;
+    case ZONE_FAST:
+        buzzerInterval = 80;
+        break;
+    case ZONE_CRITICAL:
+        buzzerInterval = 0;
+        break;
+    }
+}
+
+/*
+  Updates buzzer state using non-blocking timing
+  Uses millis() instead of delay() to keep system responsive
+*/
+void updateBuzzer()
+{
+    // Disable buzzer if sensor data is outdated
+    if (millis() - lastPacketTime > TIMEOUT)
+    {
+        digitalWrite(BUZZER_PIN, LOW);
+        buzzerState = false;
+        return;
+    }
+
+    // Continuous tone for critical distance
+    if (buzzerInterval == 0)
+    {
+        digitalWrite(BUZZER_PIN, HIGH);
+        buzzerState = true;
+        return;
+    }
+
+    // No sound zone
+    if (buzzerInterval >= 999999)
+    {
+        digitalWrite(BUZZER_PIN, LOW);
+        buzzerState = false;
+        return;
+    }
+
+    // Toggle buzzer ON/OFF based on interval
+    if (millis() - lastToggle >= buzzerInterval)
+    {
+        lastToggle = millis();
+        buzzerState = !buzzerState;
+        digitalWrite(BUZZER_PIN, buzzerState ? HIGH : LOW);
+    }
+}
+
 void setup()
 {
-    // Serial communication for debugging (PC)
-    Serial.begin(115200);
-
-    // Sensor UART communication (fixed at 9600 baud)
-    sensorSerial.begin(9600);
-
-    // Configure buzzer pin as output
-    pinMode(BUZZER_PIN, OUTPUT);
+    Serial.begin(115200);        // Serial communication for debugging (PC)
+    sensorSerial.begin(9600);    // Sensor UART communication (fixed at 9600 baud)
+    pinMode(BUZZER_PIN, OUTPUT); // Configure buzzer pin as output
 }
 
 void loop()
 {
-
     /*
       Read incoming UART data from sensor
       Sensor continuously sends 4-byte packets:
@@ -222,67 +213,40 @@ void loop()
 
         byte b = sensorSerial.read();
 
-        // Update timestamp of last received data
-        lastPacketTime = millis();
+        lastPacketTime = millis(); // Update timestamp of last received data
 
         // Wait for start byte (0xFF) to synchronize packet
         if (indexBuffer == 0 && b != 0xFF)
             continue;
 
-        // Store byte in buffer
-        buffer[indexBuffer++] = b;
+        buffer[indexBuffer++] = b; // Store byte in buffer
 
         // If full packet (4 bytes) is received
         if (indexBuffer == 4)
         {
-
             // Calculate checksum (sum of first 3 bytes, lower 8 bits)
             int sum = (buffer[0] + buffer[1] + buffer[2]) & 0xFF;
 
             // Validate packet integrity
             if (sum == buffer[3])
             {
-
                 // Combine high and low bytes into 16-bit distance value then convert to centimeters
                 float rawDistance = ((buffer[1] << 8) + buffer[2]) / 10.0;
 
-                // Apply filtering to stabilize measurement
-                distance = applyMovingAverage(rawDistance);
+                distance = applyMovingAverage(rawDistance);      // Apply filtering to stabilize measurement
+                currentZone = updateZone(distance, currentZone); // Update zone with hysteresis
+                setBuzzerFromZone(currentZone);                  // Set buzzer behavior based on zone
 
                 // Debug output to Serial Monitor
                 Serial.print("Distance: ");
                 Serial.print(distance);
-                Serial.println(" cm");
-
-                // Update zone with hysteresis
-                currentZone = updateZone(distance, currentZone);
-
-                // Set buzzer behavior based on zone
-                switch (currentZone)
-                {
-                case ZONE_SAFE:
-                    buzzerInterval = 999999;
-                    break;
-                case ZONE_SLOW:
-                    buzzerInterval = 500;
-                    break;
-                case ZONE_MEDIUM:
-                    buzzerInterval = 200;
-                    break;
-                case ZONE_FAST:
-                    buzzerInterval = 80;
-                    break;
-                case ZONE_CRITICAL:
-                    buzzerInterval = 0;
-                    break;
-                }
+                Serial.print(" cm -> Zone: ");
+                Serial.println(currentZone);
             }
-
             // Reset buffer for next packet
             indexBuffer = 0;
         }
     }
-
     // Update buzzer state continuously
     updateBuzzer();
 }
