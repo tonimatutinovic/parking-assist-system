@@ -4,13 +4,17 @@
   Pin configuration
   RX_PIN: Arduino receives data from sensor (connect sensor TX here)
   TX_PIN: Not used in this project (sensor transmits automatically)
-  BUZZER_PIN: Output pin for buzzer
+  BUZZER_PIN: Passive buzzer output pin
   REVERSE PIN: Simulates vehicle reverse gear activation using a push button
 */
+
 #define RX_PIN 11
 #define TX_PIN 10
 #define BUZZER_PIN 3
 #define REVERSE_PIN 2
+
+// Special value used to indicate that audio output should be disabled
+#define AUDIO_OFF_INTERVAL 0xFFFFFFFFUL
 
 // Distance zones for acoustic warning
 typedef enum
@@ -35,10 +39,17 @@ int indexBuffer = 0;
 // Latest measured distance (in cm)
 float distance = 0;
 
-// Buzzer control variables (non-blocking timing using millis)
-unsigned long lastToggle = 0;     // Last time buzzer state changed
-unsigned long buzzerInterval = 0; // Interval between ON/OFF toggles
-bool buzzerState = false;         // Current buzzer state
+/*
+  Audio control variables
+  audioInterval:
+    0                  -> continuous tone
+    AUDIO_OFF_INTERVAL -> no sound
+    any other value    -> beep interval in milliseconds
+*/
+unsigned long lastAudioToggle = 0;
+unsigned long audioInterval = AUDIO_OFF_INTERVAL;
+bool audioToneOn = false;
+unsigned int audioFrequency = 2800;
 
 /*
   Timeout handling
@@ -57,8 +68,12 @@ bool filterFilled = false;
 /*
   Applies moving average filter to incoming distance values
   Reduces noise and prevents rapid fluctuations in measurements
-  Parameters: newValue: latest raw distance measurement (cm)
-  Returns: filtered distance value (cm)
+
+  Parameters:
+    newValue - latest raw distance measurement (cm)
+
+  Returns:
+    filtered distance value (cm)
 */
 float applyMovingAverage(float newValue)
 {
@@ -85,10 +100,13 @@ float applyMovingAverage(float newValue)
 /*
   Updates zone based on distance using hysteresis
   Prevents rapid switching between zones near boundaries
+
   Parameters:
-    d: distance (cm),
-    current: current active zone
-  Returns: updated zone
+    d - distance (cm),
+    current - current active zone
+
+  Returns:
+    updated zone
 */
 zone_t updateZone(float d, zone_t current)
 {
@@ -130,73 +148,114 @@ zone_t updateZone(float d, zone_t current)
 }
 
 /*
-  Sets buzzer interval based on current warning zone
+  Starts buzzer tone only if it is currently OFF
 */
-void setBuzzerFromZone(zone_t zone)
+void startAudioTone()
 {
+    if (!audioToneOn)
+    {
+        tone(BUZZER_PIN, audioFrequency);
+        audioToneOn = true;
+    }
+}
+
+/*
+  Stops buzzer tone only if it is currently ON
+*/
+void stopAudioTone()
+{
+    if (audioToneOn)
+    {
+        noTone(BUZZER_PIN);
+        audioToneOn = false;
+    }
+}
+
+/*
+  Sets audio behavior based on current warning zone
+
+  For now, all zones use the same frequency and only differ in beep interval.
+  This function is intentionally separated so future versions can assign:
+  - different tones to different sensors
+  - different sound patterns to fault states
+*/
+void setAudioFromZone(zone_t zone)
+{
+    audioFrequency = 2800;
+
     switch (zone)
     {
     case ZONE_SAFE:
-        buzzerInterval = 999999;
+        audioInterval = AUDIO_OFF_INTERVAL;
         break;
+
     case ZONE_SLOW:
-        buzzerInterval = 500;
+        audioInterval = 500;
         break;
+
     case ZONE_MEDIUM:
-        buzzerInterval = 200;
+        audioInterval = 200;
         break;
+
     case ZONE_FAST:
-        buzzerInterval = 80;
+        audioInterval = 80;
         break;
+
     case ZONE_CRITICAL:
-        buzzerInterval = 0;
+        audioInterval = 0;
         break;
     }
 }
 
 /*
-  Updates buzzer state using non-blocking timing
-  Uses millis() instead of delay() to keep system responsive
+  Updates passive buzzer output using non-blocking timing
+
+  Behavior:
+  - outdated sensor data -> audio disabled
+  - interval == 0        -> continuous tone
+  - interval == OFF      -> no sound
+  - otherwise            -> periodic beeping
 */
-void updateBuzzer()
+void updateAudio()
 {
-    // Disable buzzer if sensor data is outdated
     if (millis() - lastPacketTime > TIMEOUT)
     {
-        digitalWrite(BUZZER_PIN, LOW);
-        buzzerState = false;
+        stopAudioTone();
         return;
     }
 
-    // Continuous tone for critical distance
-    if (buzzerInterval == 0)
+    if (audioInterval == 0)
     {
-        digitalWrite(BUZZER_PIN, HIGH);
-        buzzerState = true;
+        startAudioTone();
         return;
     }
 
-    // No sound zone
-    if (buzzerInterval >= 999999)
+    if (audioInterval == AUDIO_OFF_INTERVAL)
     {
-        digitalWrite(BUZZER_PIN, LOW);
-        buzzerState = false;
+        stopAudioTone();
         return;
     }
 
-    // Toggle buzzer ON/OFF based on interval
-    if (millis() - lastToggle >= buzzerInterval)
+    if (millis() - lastAudioToggle >= audioInterval)
     {
-        lastToggle = millis();
-        buzzerState = !buzzerState;
-        digitalWrite(BUZZER_PIN, buzzerState ? HIGH : LOW);
+        lastAudioToggle = millis();
+
+        if (audioToneOn)
+        {
+            stopAudioTone();
+        }
+        else
+        {
+            startAudioTone();
+        }
     }
 }
 
 void setup()
 {
-    Serial.begin(115200);               // Serial communication for debugging (PC)
-    sensorSerial.begin(9600);           // Sensor UART communication (fixed at 9600 baud)
+    Serial.begin(115200);     // Serial communication for debugging (PC)
+    sensorSerial.begin(9600); // Sensor UART communication (fixed at 9600 baud)
+
     pinMode(BUZZER_PIN, OUTPUT);        // Configure buzzer pin as output
     pinMode(REVERSE_PIN, INPUT_PULLUP); // Configure reverse input with internal pull-up resistor
 }
@@ -209,8 +268,8 @@ void loop()
     // If reverse is OFF, disable system
     if (!reverseActive)
     {
-        digitalWrite(BUZZER_PIN, LOW);
-        buzzerState = false;
+        stopAudioTone();
+        currentZone = ZONE_SAFE;
         return;
     }
     /*
@@ -248,7 +307,7 @@ void loop()
 
                 distance = applyMovingAverage(rawDistance);      // Apply filtering to stabilize measurement
                 currentZone = updateZone(distance, currentZone); // Update zone with hysteresis
-                setBuzzerFromZone(currentZone);                  // Set buzzer behavior based on zone
+                setAudioFromZone(currentZone);                   // Set buzzer behavior based on zone
 
                 // Debug output to Serial Monitor
                 Serial.print("Distance: ");
@@ -261,5 +320,5 @@ void loop()
         }
     }
     // Update buzzer state continuously
-    updateBuzzer();
+    updateAudio();
 }

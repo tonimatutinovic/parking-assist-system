@@ -10,6 +10,8 @@ This project implements a simplified automotive-style parking assist system usin
 
 The system continuously measures the distance behind the vehicle and provides acoustic feedback to the driver. The warning frequency increases as the distance to an obstacle decreases, mimicking real-world parking assist systems.
 
+The project is being developed as a rapid prototype on Arduino Nano, with a long-term goal of migrating to STM32 and extending the system with more advanced automotive-style features.
+
 ---
 
 ## Features
@@ -17,13 +19,14 @@ The system continuously measures the distance behind the vehicle and provides ac
 - UART-based ultrasonic distance measurement (A02YYUW)
 - Real-time distance processing
 - Distance-based adaptive acoustic warning
+- Passive buzzer audio output using non-blocking tone control
+- Audio layer prepared for future multi-sensor and fault-specific sound patterns
+- Moving average filtering for stable distance measurement
+- Hysteresis-based distance zones for stable behavior
+- Reverse activation simulated using push button input
 - Non-blocking timing using `millis()`
 - Packet validation using checksum
 - Timeout-based safety handling
-- Moving average filtering for stable distance measurement
-- Hysteresis-based distance zones for stable behavior
-- Active buzzer for acoustic warning (ON/OFF control)
-- Reverse activation simulated using push button input
 
 ---
 
@@ -31,7 +34,8 @@ The system continuously measures the distance behind the vehicle and provides ac
 
 - Arduino Nano
 - Waterproof ultrasonic sensor (A02YYUW / A0221AU)
-- Buzzer (active)
+- Passive buzzer
+- Push button (reverse activation simulation)
 - Breadboard and jumper wires
 
 ---
@@ -54,6 +58,13 @@ The system continuously measures the distance behind the vehicle and provides ac
 | +         | D3     |
 | -         | GND    |
 
+### Reverse Simulation Button
+
+| Button Pin | Arduino |
+|-----------|--------|
+| 1 side    | D2     |
+| 1 side    | GND    |
+
 ---
 
 ## System Behavior
@@ -63,7 +74,8 @@ The system operates in real time:
 - The sensor continuously sends distance data via UART
 - The Arduino parses incoming packets and validates them using checksum
 - Distance is calculated and mapped to warning zones
-- The buzzer generates acoustic feedback based on proximity
+- The passive buzzer generates acoustic feedback based on proximity
+- The system is active only when reverse input is enabled
 
 ### Warning Zones
 
@@ -85,7 +97,7 @@ For development and testing purposes, reverse activation is simulated using a pu
 
 When reverse is not active:
 - Sensor data is ignored
-- Buzzer is disabled
+- Audio output is disabled
 
 ---
 
@@ -94,8 +106,15 @@ When reverse is not active:
 The system is structured into three logical parts:
 
 - **Data acquisition** – reading UART packets from the sensor  
-- **Processing** – validating and converting distance data  
-- **Actuation** – controlling the buzzer using non-blocking timing  
+- **Processing** – validating, filtering and converting distance data  
+- **Decision logic** – warning zone selection with hysteresis  
+- **Audio output** – passive buzzer control using non-blocking timing
+
+This structure is intended to support future expansion with:
+- multiple ultrasonic sensors
+- fault-specific warning patterns
+- state machine control
+- migration to STM32
 
 ---
 
@@ -116,34 +135,38 @@ Distance is converted to centimeters:
 distance = ((high_byte << 8) + low_byte) / 10
 ```
 
-
 ---
 
 ## Safety Features
 
 - **Checksum validation** ensures data integrity  
-- **Timeout mechanism** disables buzzer if sensor data is lost  
+- **Timeout mechanism** disables audio output if sensor data is lost  
+- **Reverse-controlled operation** prevents continuous system activity outside reverse mode
 
 ---
 
 ## Current Status
 
-**V2 – Reverse activation and improved control logic**
+**V3 – Passive buzzer audio refactor and reverse-controlled operation**
 
 - Distance measurement 
 - Filtering
 - Hysteresis 
-- Active buzzer
+- Passive buzzer audio control
 - Reverse activation
 
 ---
 
 ## Future Improvements
-
-- Reverse gear activation input  
+ 
+- State machine architecture 
 - Sensor fault detection  
-- State machine architecture  
-- Multi-sensor support  
+- Dirty sensor error detection
+- Fault-specific acoustic warning patterns
+- Additional ultrasonic sensor for curb detection
+- IMU-based tilt-aware warning logic
+- Migration from Arduino Nano to STM32
+- CAN-based vehicle communication
 
 ---
 
