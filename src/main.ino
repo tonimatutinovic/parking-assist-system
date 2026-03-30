@@ -82,13 +82,8 @@ unsigned long audioInterval = AUDIO_OFF_INTERVAL;
 bool audioToneOn = false;
 unsigned int audioFrequency = 2800;
 
-/*
-  Fault audio pattern control
-*/
-bool faultPatternActive = false;
-unsigned long faultStepStartTime = 0;
+// Timestamp marking the start of the fault audio pattern cycle
 unsigned long faultCycleStartTime = 0;
-bool faultTonePhase = false;
 
 // Number of consecutive invalid sensor packets
 uint8_t invalidPacketCount = 0;
@@ -103,8 +98,23 @@ const uint8_t INVALID_PACKET_THRESHOLD = 5;
 */
 const unsigned long TIMEOUT = 200; // milliseconds
 unsigned long lastPacketTime = 0;
-
 bool sensorDataValid = false;
+
+/*
+  Dirty sensor detection variables
+
+  Dirty sensor is detected when valid packets continue to arrive,
+  but filtered distance remains abnormally unstable over time.
+*/
+float previousFilteredDistance = 0.0;
+bool previousDistanceValid = false;
+
+uint8_t distanceJumpCount = 0;
+
+// Dirty sensor detection thresholds
+const float DIRTY_JUMP_THRESHOLD_CM = 12.0;
+const uint8_t DIRTY_SENSOR_THRESHOLD = 8;
+const uint8_t DIRTY_SENSOR_RECOVERY_THRESHOLD = 3;
 
 // Moving average filter
 #define FILTER_SIZE 5
@@ -273,7 +283,7 @@ void setAudioFromFault(fault_t fault)
         break;
 
     case FAULT_DIRTY_SENSOR:
-        audioFrequency = 1200;
+        audioFrequency = 1100;
         break;
 
     default:
@@ -326,6 +336,7 @@ void updateAudio()
   Patterns:
   - FAULT_TIMEOUT        -> 3 long beeps
   - FAULT_SENSOR_INVALID -> 2 long beeps
+  - FAULT_DIRTY_SENSOR   -> 1 very long beep + short pause
 */
 void updateFaultAudio(fault_t fault)
 {
@@ -333,41 +344,81 @@ void updateFaultAudio(fault_t fault)
     const unsigned long LONG_BEEP_OFF = 250;
     const unsigned long PATTERN_PAUSE = 1000;
 
-    uint8_t beepCount = 0;
+    const unsigned long DIRTY_BEEP_ON = 900;
+    const unsigned long DIRTY_BEEP_OFF = 300;
+
+    unsigned long now = millis();
 
     switch (fault)
     {
     case FAULT_TIMEOUT:
-        beepCount = 3;
-        break;
+    {
+        const uint8_t beepCount = 3;
+        unsigned long cycleDuration =
+            beepCount * (LONG_BEEP_ON + LONG_BEEP_OFF) + PATTERN_PAUSE;
+
+        unsigned long cycleTime = (now - faultCycleStartTime) % cycleDuration;
+
+        for (uint8_t i = 0; i < beepCount; i++)
+        {
+            unsigned long onStart = i * (LONG_BEEP_ON + LONG_BEEP_OFF);
+            unsigned long onEnd = onStart + LONG_BEEP_ON;
+
+            if (cycleTime >= onStart && cycleTime < onEnd)
+            {
+                startAudioTone();
+                return;
+            }
+        }
+
+        stopAudioTone();
+        return;
+    }
 
     case FAULT_SENSOR_INVALID:
-        beepCount = 2;
-        break;
+    {
+        const uint8_t beepCount = 2;
+        unsigned long cycleDuration =
+            beepCount * (LONG_BEEP_ON + LONG_BEEP_OFF) + PATTERN_PAUSE;
+
+        unsigned long cycleTime = (now - faultCycleStartTime) % cycleDuration;
+
+        for (uint8_t i = 0; i < beepCount; i++)
+        {
+            unsigned long onStart = i * (LONG_BEEP_ON + LONG_BEEP_OFF);
+            unsigned long onEnd = onStart + LONG_BEEP_ON;
+
+            if (cycleTime >= onStart && cycleTime < onEnd)
+            {
+                startAudioTone();
+                return;
+            }
+        }
+
+        stopAudioTone();
+        return;
+    }
+
+    case FAULT_DIRTY_SENSOR:
+    {
+        unsigned long cycleDuration = DIRTY_BEEP_ON + DIRTY_BEEP_OFF;
+        unsigned long cycleTime = (now - faultCycleStartTime) % cycleDuration;
+
+        if (cycleTime < DIRTY_BEEP_ON)
+        {
+            startAudioTone();
+        }
+        else
+        {
+            stopAudioTone();
+        }
+        return;
+    }
 
     default:
         stopAudioTone();
         return;
     }
-
-    unsigned long now = millis();
-    unsigned long cycleDuration = beepCount * (LONG_BEEP_ON + LONG_BEEP_OFF) + PATTERN_PAUSE;
-
-    unsigned long cycleTime = (now - faultCycleStartTime) % cycleDuration;
-
-    for (uint8_t i = 0; i < beepCount; i++)
-    {
-        unsigned long onStart = i * (LONG_BEEP_ON + LONG_BEEP_OFF);
-        unsigned long onEnd = onStart + LONG_BEEP_ON;
-
-        if (cycleTime >= onStart && cycleTime < onEnd)
-        {
-            startAudioTone();
-            return;
-        }
-    }
-
-    stopAudioTone();
 }
 
 /*
@@ -426,7 +477,64 @@ fault_t detectFault(bool reverseActive)
         return FAULT_SENSOR_INVALID;
     }
 
+    if (reverseActive && sensorDataValid)
+    {
+        if (currentFault == FAULT_DIRTY_SENSOR)
+        {
+            if (distanceJumpCount > DIRTY_SENSOR_RECOVERY_THRESHOLD)
+            {
+                return FAULT_DIRTY_SENSOR;
+            }
+        }
+        else
+        {
+            if (distanceJumpCount >= DIRTY_SENSOR_THRESHOLD)
+            {
+                return FAULT_DIRTY_SENSOR;
+            }
+        }
+    }
+
     return FAULT_NONE;
+}
+
+/*
+  Updates dirty sensor detection based on filtered distance stability
+
+  If filtered distance changes too abruptly multiple times in a row,
+  the sensor is considered degraded (e.g. dirty, wet, or partially blocked).
+*/
+void updateDirtySensorMonitor(float filteredDistance)
+{
+    if (!previousDistanceValid)
+    {
+        previousFilteredDistance = filteredDistance;
+        previousDistanceValid = true;
+        return;
+    }
+
+    float delta = abs(filteredDistance - previousFilteredDistance);
+
+    if (delta >= DIRTY_JUMP_THRESHOLD_CM)
+    {
+        if (distanceJumpCount < 255)
+        {
+            distanceJumpCount++;
+        }
+    }
+    else
+    {
+        if (distanceJumpCount >= 2)
+        {
+            distanceJumpCount -= 2;
+        }
+        else
+        {
+            distanceJumpCount = 0;
+        }
+    }
+
+    previousFilteredDistance = filteredDistance;
 }
 
 /*
@@ -438,6 +546,10 @@ void resetFaultLogic()
     indexBuffer = 0;
     stopAudioTone();
     audioInterval = AUDIO_OFF_INTERVAL;
+
+    previousFilteredDistance = 0.0;
+    previousDistanceValid = false;
+    distanceJumpCount = 0;
 }
 
 /*
@@ -450,8 +562,10 @@ void resetSystemLogic()
     indexBuffer = 0;
     sensorDataValid = false;
     invalidPacketCount = 0;
-    faultPatternActive = false;
-    faultTonePhase = false;
+
+    previousFilteredDistance = 0.0;
+    previousDistanceValid = false;
+    distanceJumpCount = 0;
 }
 
 void setup()
@@ -515,7 +629,9 @@ void loop()
                 // Combine high and low bytes into 16-bit distance value then convert to centimeters
                 float rawDistance = ((buffer[1] << 8) + buffer[2]) / 10.0;
 
-                distance = applyMovingAverage(rawDistance);      // Apply filtering to stabilize measurement
+                distance = applyMovingAverage(rawDistance); // Apply filtering to stabilize measurement
+                updateDirtySensorMonitor(distance);
+
                 currentZone = updateZone(distance, currentZone); // Update zone with hysteresis
                 setAudioFromZone(currentZone);                   // Set buzzer behavior based on zone
 
@@ -523,7 +639,9 @@ void loop()
                 Serial.print("Distance: ");
                 Serial.print(distance);
                 Serial.print(" cm -> Zone: ");
-                Serial.println(currentZone);
+                Serial.print(currentZone);
+                Serial.print("Dirty count: ");
+                Serial.println(distanceJumpCount);
             }
             else
             {
@@ -571,10 +689,20 @@ void loop()
         return;
 
     case STATE_FAULT:
-        indexBuffer = 0;
-        audioInterval = AUDIO_OFF_INTERVAL;
-        setAudioFromFault(currentFault);
-        updateFaultAudio(currentFault);
+        Serial.print("FAULT ACTIVE: ");
+        Serial.println(currentFault);
+
+        if (currentFault != FAULT_DIRTY_SENSOR)
+        {
+            indexBuffer = 0;
+            audioInterval = AUDIO_OFF_INTERVAL;
+            setAudioFromFault(currentFault);
+            updateFaultAudio(currentFault);
+        }
+        else
+        {
+            stopAudioTone();
+        }
         return;
 
     case STATE_ACTIVE:

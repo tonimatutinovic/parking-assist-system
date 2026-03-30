@@ -31,6 +31,7 @@ The project is being developed as a rapid prototype on Arduino Nano, with a long
 - Structured fault detection framework (extensible for multiple fault types)
 - Invalid sensor packet fault detection
 - Fault-specific acoustic warning patterns
+- Dirty sensor fault detection based on measurement instability
 
 ---
 
@@ -107,7 +108,7 @@ When reverse is not active:
 
 ## Software Architecture
 
-The system is structured into three logical parts:
+The system is structured into several logical parts:
 
 - **Data acquisition** – reading UART packets from the sensor  
 - **Processing** – validating, filtering and converting distance data  
@@ -151,9 +152,21 @@ distance = ((high_byte << 8) + low_byte) / 10
 
 ---
 
+## Known Limitations (Prototype Stage)
+
+During testing on Arduino Nano using SoftwareSerial, it was observed that long-duration tone generation for certain fault patterns can interfere with UART communication.
+
+As a result:
+- Dirty sensor fault detection is fully implemented
+- Dirty sensor acoustic pattern is temporarily disabled on this platform
+
+This limitation is expected to be resolved in future versions when migrating to STM32 with hardware UART.
+
+---
+
 ## Current Status
 
-**V5 – Fault detection and fault-specific acoustic warning**
+**V6 – Extended fault detection with dirty sensor monitoring**
 
 - Distance measurement 
 - Filtering
@@ -163,13 +176,14 @@ distance = ((high_byte << 8) + low_byte) / 10
 - State machine control
 - Timeout fault detection
 - Invalid packet fault detection
+- Dirty sensor fault detection
 - Fault-specific acoustic warning
 
 ---
 
 ## Future Improvements
    
-- Dirty sensor error detection
+- Robust dirty sensor audio signaling without interference on the prototype platform
 - Additional ultrasonic sensor for curb detection
 - IMU-based tilt-aware warning logic
 - Migration from Arduino Nano to STM32
