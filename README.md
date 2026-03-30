@@ -28,6 +28,7 @@ The project is being developed as a rapid prototype on Arduino Nano, with a long
 - Non-blocking timing using `millis()`
 - Packet validation using checksum
 - Timeout-based safety handling
+- Structured fault detection framework (extensible for multiple fault types)
 
 ---
 

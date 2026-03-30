@@ -36,16 +36,28 @@ typedef enum
     STATE_FAULT
 } system_state_t;
 
+/*
+  Fault types
+*/
+typedef enum
+{
+    FAULT_NONE,
+    FAULT_TIMEOUT,
+    FAULT_SENSOR_INVALID,
+    FAULT_DIRTY_SENSOR
+} fault_t;
+
 // Current active zone
 zone_t currentZone = ZONE_SAFE;
 
 // Current system state
 system_state_t currentState = STATE_IDLE;
 
-// Fault flag
-bool faultDetected = false;
+// Current active fault
+fault_t currentFault = FAULT_NONE;
 
-bool sensorDataValid = false;
+// Fault flag derived from current fault type
+bool faultDetected = false;
 
 // Software UART for ultrasonic sensor communication
 SoftwareSerial sensorSerial(RX_PIN, TX_PIN);
@@ -71,10 +83,13 @@ unsigned int audioFrequency = 2800;
 
 /*
   Timeout handling
-  If no data is received from sensor within TIMEOUT, buzzer will be disabled for safety
+  If no data is received from sensor within TIMEOUT,
+  a timeout fault can be triggered while reverse is active
 */
 const unsigned long TIMEOUT = 200; // milliseconds
 unsigned long lastPacketTime = 0;
+
+bool sensorDataValid = false;
 
 // Moving average filter
 #define FILTER_SIZE 5
@@ -301,6 +316,20 @@ system_state_t updateSystemState(bool reverseActive, bool faultDetected, system_
 }
 
 /*
+  Detects current system fault
+  (For now, only timeout fault is implemented)
+*/
+fault_t detectFault(bool reverseActive)
+{
+    if (reverseActive && sensorDataValid && ((millis() - lastPacketTime) > TIMEOUT))
+    {
+        return FAULT_TIMEOUT;
+    }
+
+    return FAULT_NONE;
+}
+
+/*
   Resets runtime warning logic when system becomes inactive
 */
 void resetSystemLogic()
@@ -326,11 +355,10 @@ void loop()
     bool reverseActive = (digitalRead(REVERSE_PIN) == LOW);
 
     // Timeout is currently used as the first fault condition.
-    faultDetected = reverseActive && sensorDataValid && ((millis() - lastPacketTime) > TIMEOUT);
+    currentFault = detectFault(reverseActive);
+    faultDetected = (currentFault != FAULT_NONE);
 
-    /*
-      Update system state
-    */
+    // Update system state
     currentState = updateSystemState(reverseActive, faultDetected, currentState);
 
     switch (currentState)
@@ -342,6 +370,7 @@ void loop()
 
     case STATE_FAULT:
         stopAudioTone();
+        audioInterval = AUDIO_OFF_INTERVAL;
         return;
 
     case STATE_ACTIVE:
@@ -377,10 +406,10 @@ void loop()
             // Validate packet integrity
             if (sum == buffer[3])
             {
+                sensorDataValid = true;
+
                 // Combine high and low bytes into 16-bit distance value then convert to centimeters
                 float rawDistance = ((buffer[1] << 8) + buffer[2]) / 10.0;
-
-                sensorDataValid = true;
 
                 distance = applyMovingAverage(rawDistance);      // Apply filtering to stabilize measurement
                 currentZone = updateZone(distance, currentZone); // Update zone with hysteresis
