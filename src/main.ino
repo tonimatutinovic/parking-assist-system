@@ -26,8 +26,26 @@ typedef enum
     ZONE_CRITICAL
 } zone_t;
 
+/*
+  System states
+*/
+typedef enum
+{
+    STATE_IDLE,
+    STATE_ACTIVE,
+    STATE_FAULT
+} system_state_t;
+
 // Current active zone
 zone_t currentZone = ZONE_SAFE;
+
+// Current system state
+system_state_t currentState = STATE_IDLE;
+
+// Fault flag
+bool faultDetected = false;
+
+bool sensorDataValid = false;
 
 // Software UART for ultrasonic sensor communication
 SoftwareSerial sensorSerial(RX_PIN, TX_PIN);
@@ -218,12 +236,6 @@ void setAudioFromZone(zone_t zone)
 */
 void updateAudio()
 {
-    if (millis() - lastPacketTime > TIMEOUT)
-    {
-        stopAudioTone();
-        return;
-    }
-
     if (audioInterval == 0)
     {
         startAudioTone();
@@ -251,6 +263,54 @@ void updateAudio()
     }
 }
 
+/*
+  Updates system state based on reverse input and fault condition
+*/
+system_state_t updateSystemState(bool reverseActive, bool faultDetected, system_state_t current)
+{
+    switch (current)
+    {
+    case STATE_IDLE:
+        if (reverseActive)
+        {
+            if (faultDetected)
+                return STATE_FAULT;
+            else
+                return STATE_ACTIVE;
+        }
+        break;
+
+    case STATE_ACTIVE:
+        if (!reverseActive)
+            return STATE_IDLE;
+
+        if (faultDetected)
+            return STATE_FAULT;
+        break;
+
+    case STATE_FAULT:
+        if (!reverseActive)
+            return STATE_IDLE;
+
+        if (!faultDetected)
+            return STATE_ACTIVE;
+        break;
+    }
+
+    return current;
+}
+
+/*
+  Resets runtime warning logic when system becomes inactive
+*/
+void resetSystemLogic()
+{
+    currentZone = ZONE_SAFE;
+    audioInterval = AUDIO_OFF_INTERVAL;
+    indexBuffer = 0;
+    sensorDataValid = false;
+}
+
 void setup()
 {
     Serial.begin(115200);     // Serial communication for debugging (PC)
@@ -265,12 +325,27 @@ void loop()
     // Read reverse state (active LOW)
     bool reverseActive = (digitalRead(REVERSE_PIN) == LOW);
 
-    // If reverse is OFF, disable system
-    if (!reverseActive)
+    // Timeout is currently used as the first fault condition.
+    faultDetected = reverseActive && sensorDataValid && ((millis() - lastPacketTime) > TIMEOUT);
+
+    /*
+      Update system state
+    */
+    currentState = updateSystemState(reverseActive, faultDetected, currentState);
+
+    switch (currentState)
     {
+    case STATE_IDLE:
         stopAudioTone();
-        currentZone = ZONE_SAFE;
+        resetSystemLogic();
         return;
+
+    case STATE_FAULT:
+        stopAudioTone();
+        return;
+
+    case STATE_ACTIVE:
+        break;
     }
     /*
       Read incoming UART data from sensor
@@ -305,12 +380,16 @@ void loop()
                 // Combine high and low bytes into 16-bit distance value then convert to centimeters
                 float rawDistance = ((buffer[1] << 8) + buffer[2]) / 10.0;
 
+                sensorDataValid = true;
+
                 distance = applyMovingAverage(rawDistance);      // Apply filtering to stabilize measurement
                 currentZone = updateZone(distance, currentZone); // Update zone with hysteresis
                 setAudioFromZone(currentZone);                   // Set buzzer behavior based on zone
 
                 // Debug output to Serial Monitor
-                Serial.print("Distance: ");
+                Serial.print("State: ");
+                Serial.print(currentState);
+                Serial.print(" | Distance: ");
                 Serial.print(distance);
                 Serial.print(" cm -> Zone: ");
                 Serial.println(currentZone);

@@ -24,6 +24,7 @@ The project is being developed as a rapid prototype on Arduino Nano, with a long
 - Moving average filtering for stable distance measurement
 - Hysteresis-based distance zones for stable behavior
 - Reverse activation simulated using push button input
+- State machine-based control flow (IDLE / ACTIVE / FAULT)
 - Non-blocking timing using `millis()`
 - Packet validation using checksum
 - Timeout-based safety handling
@@ -109,6 +110,7 @@ The system is structured into three logical parts:
 - **Processing** – validating, filtering and converting distance data  
 - **Decision logic** – warning zone selection with hysteresis  
 - **Audio output** – passive buzzer control using non-blocking timing
+- **State control** – system-level mode handling using a state machine
 
 This structure is intended to support future expansion with:
 - multiple ultrasonic sensors
@@ -147,19 +149,19 @@ distance = ((high_byte << 8) + low_byte) / 10
 
 ## Current Status
 
-**V3 – Passive buzzer audio refactor and reverse-controlled operation**
+**V4 – State machine-based system control**
 
 - Distance measurement 
 - Filtering
 - Hysteresis 
 - Passive buzzer audio control
 - Reverse activation
+- State machine control
 
 ---
 
 ## Future Improvements
- 
-- State machine architecture 
+  
 - Sensor fault detection  
 - Dirty sensor error detection
 - Fault-specific acoustic warning patterns
