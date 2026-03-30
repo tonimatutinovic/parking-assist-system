@@ -50,8 +50,9 @@ typedef enum
 // Current active zone
 zone_t currentZone = ZONE_SAFE;
 
-// Current system state
+// Current and previous system state
 system_state_t currentState = STATE_IDLE;
+system_state_t previousState = STATE_IDLE;
 
 // Current active fault
 fault_t currentFault = FAULT_NONE;
@@ -80,6 +81,20 @@ unsigned long lastAudioToggle = 0;
 unsigned long audioInterval = AUDIO_OFF_INTERVAL;
 bool audioToneOn = false;
 unsigned int audioFrequency = 2800;
+
+/*
+  Fault audio pattern control
+*/
+bool faultPatternActive = false;
+unsigned long faultStepStartTime = 0;
+unsigned long faultCycleStartTime = 0;
+bool faultTonePhase = false;
+
+// Number of consecutive invalid sensor packets
+uint8_t invalidPacketCount = 0;
+
+// Threshold for invalid packet fault activation
+const uint8_t INVALID_PACKET_THRESHOLD = 5;
 
 /*
   Timeout handling
@@ -241,6 +256,33 @@ void setAudioFromZone(zone_t zone)
 }
 
 /*
+  Sets base audio configuration for fault conditions
+  Fault patterns are played by a dedicated pattern handler.
+  This function only selects the tone frequency.
+*/
+void setAudioFromFault(fault_t fault)
+{
+    switch (fault)
+    {
+    case FAULT_TIMEOUT:
+        audioFrequency = 1500;
+        break;
+
+    case FAULT_SENSOR_INVALID:
+        audioFrequency = 2000;
+        break;
+
+    case FAULT_DIRTY_SENSOR:
+        audioFrequency = 1200;
+        break;
+
+    default:
+        audioFrequency = 2800;
+        break;
+    }
+}
+
+/*
   Updates passive buzzer output using non-blocking timing
 
   Behavior:
@@ -276,6 +318,56 @@ void updateAudio()
             startAudioTone();
         }
     }
+}
+
+/*
+  Plays fault-specific audio patterns using non-blocking timing
+
+  Patterns:
+  - FAULT_TIMEOUT        -> 3 long beeps
+  - FAULT_SENSOR_INVALID -> 2 long beeps
+*/
+void updateFaultAudio(fault_t fault)
+{
+    const unsigned long LONG_BEEP_ON = 400;
+    const unsigned long LONG_BEEP_OFF = 250;
+    const unsigned long PATTERN_PAUSE = 1000;
+
+    uint8_t beepCount = 0;
+
+    switch (fault)
+    {
+    case FAULT_TIMEOUT:
+        beepCount = 3;
+        break;
+
+    case FAULT_SENSOR_INVALID:
+        beepCount = 2;
+        break;
+
+    default:
+        stopAudioTone();
+        return;
+    }
+
+    unsigned long now = millis();
+    unsigned long cycleDuration = beepCount * (LONG_BEEP_ON + LONG_BEEP_OFF) + PATTERN_PAUSE;
+
+    unsigned long cycleTime = (now - faultCycleStartTime) % cycleDuration;
+
+    for (uint8_t i = 0; i < beepCount; i++)
+    {
+        unsigned long onStart = i * (LONG_BEEP_ON + LONG_BEEP_OFF);
+        unsigned long onEnd = onStart + LONG_BEEP_ON;
+
+        if (cycleTime >= onStart && cycleTime < onEnd)
+        {
+            startAudioTone();
+            return;
+        }
+    }
+
+    stopAudioTone();
 }
 
 /*
@@ -317,7 +409,10 @@ system_state_t updateSystemState(bool reverseActive, bool faultDetected, system_
 
 /*
   Detects current system fault
-  (For now, only timeout fault is implemented)
+
+  Implemented faults:
+  - timeout fault
+  - invalid sensor packet fault
 */
 fault_t detectFault(bool reverseActive)
 {
@@ -326,7 +421,23 @@ fault_t detectFault(bool reverseActive)
         return FAULT_TIMEOUT;
     }
 
+    if (reverseActive && invalidPacketCount >= INVALID_PACKET_THRESHOLD)
+    {
+        return FAULT_SENSOR_INVALID;
+    }
+
     return FAULT_NONE;
+}
+
+/*
+  Resets fault-related runtime data after fault recovery
+*/
+void resetFaultLogic()
+{
+    invalidPacketCount = 0;
+    indexBuffer = 0;
+    stopAudioTone();
+    audioInterval = AUDIO_OFF_INTERVAL;
 }
 
 /*
@@ -338,6 +449,9 @@ void resetSystemLogic()
     audioInterval = AUDIO_OFF_INTERVAL;
     indexBuffer = 0;
     sensorDataValid = false;
+    invalidPacketCount = 0;
+    faultPatternActive = false;
+    faultTonePhase = false;
 }
 
 void setup()
@@ -354,28 +468,17 @@ void loop()
     // Read reverse state (active LOW)
     bool reverseActive = (digitalRead(REVERSE_PIN) == LOW);
 
-    // Timeout is currently used as the first fault condition.
-    currentFault = detectFault(reverseActive);
-    faultDetected = (currentFault != FAULT_NONE);
-
-    // Update system state
-    currentState = updateSystemState(reverseActive, faultDetected, currentState);
-
-    switch (currentState)
+    // If reverse is OFF, system stays idle
+    if (!reverseActive)
     {
-    case STATE_IDLE:
+        currentState = STATE_IDLE;
+        currentFault = FAULT_NONE;
+        faultDetected = false;
         stopAudioTone();
         resetSystemLogic();
         return;
-
-    case STATE_FAULT:
-        stopAudioTone();
-        audioInterval = AUDIO_OFF_INTERVAL;
-        return;
-
-    case STATE_ACTIVE:
-        break;
     }
+
     /*
       Read incoming UART data from sensor
       Sensor continuously sends 4-byte packets:
@@ -407,6 +510,7 @@ void loop()
             if (sum == buffer[3])
             {
                 sensorDataValid = true;
+                invalidPacketCount = 0;
 
                 // Combine high and low bytes into 16-bit distance value then convert to centimeters
                 float rawDistance = ((buffer[1] << 8) + buffer[2]) / 10.0;
@@ -416,17 +520,65 @@ void loop()
                 setAudioFromZone(currentZone);                   // Set buzzer behavior based on zone
 
                 // Debug output to Serial Monitor
-                Serial.print("State: ");
-                Serial.print(currentState);
-                Serial.print(" | Distance: ");
+                Serial.print("Distance: ");
                 Serial.print(distance);
                 Serial.print(" cm -> Zone: ");
                 Serial.println(currentZone);
             }
+            else
+            {
+                if (invalidPacketCount < 255)
+                {
+                    invalidPacketCount++;
+                }
+
+                Serial.print("Invalid packet count: ");
+                Serial.println(invalidPacketCount);
+            }
+
             // Reset buffer for next packet
             indexBuffer = 0;
         }
     }
-    // Update buzzer state continuously
-    updateAudio();
+
+    // Timeout is currently used as the first fault condition.
+    currentFault = detectFault(reverseActive);
+    faultDetected = (currentFault != FAULT_NONE);
+
+    // Update system state
+    currentState = updateSystemState(reverseActive, faultDetected, currentState);
+
+    if (currentState != previousState)
+    {
+        if (currentState == STATE_FAULT)
+        {
+            faultCycleStartTime = millis();
+        }
+        if (previousState == STATE_FAULT && currentState == STATE_ACTIVE)
+        {
+            resetFaultLogic();
+        }
+
+        previousState = currentState;
+    }
+
+    // Handle output according to current state
+    switch (currentState)
+    {
+    case STATE_IDLE:
+        stopAudioTone();
+        resetSystemLogic();
+        return;
+
+    case STATE_FAULT:
+        indexBuffer = 0;
+        audioInterval = AUDIO_OFF_INTERVAL;
+        setAudioFromFault(currentFault);
+        updateFaultAudio(currentFault);
+        return;
+
+    case STATE_ACTIVE:
+        updateAudio();
+        return;
+    }
 }

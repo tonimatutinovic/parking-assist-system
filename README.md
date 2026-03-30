@@ -29,6 +29,8 @@ The project is being developed as a rapid prototype on Arduino Nano, with a long
 - Packet validation using checksum
 - Timeout-based safety handling
 - Structured fault detection framework (extensible for multiple fault types)
+- Invalid sensor packet fault detection
+- Fault-specific acoustic warning patterns
 
 ---
 
@@ -143,14 +145,15 @@ distance = ((high_byte << 8) + low_byte) / 10
 ## Safety Features
 
 - **Checksum validation** ensures data integrity  
-- **Timeout mechanism** disables audio output if sensor data is lost  
+- **Timeout monitoring**  detects loss of valid sensor communication
+- **Fault-specific warning patterns** provide audible fault feedback
 - **Reverse-controlled operation** prevents continuous system activity outside reverse mode
 
 ---
 
 ## Current Status
 
-**V4 – State machine-based system control**
+**V5 – Fault detection and fault-specific acoustic warning**
 
 - Distance measurement 
 - Filtering
@@ -158,14 +161,15 @@ distance = ((high_byte << 8) + low_byte) / 10
 - Passive buzzer audio control
 - Reverse activation
 - State machine control
+- Timeout fault detection
+- Invalid packet fault detection
+- Fault-specific acoustic warning
 
 ---
 
 ## Future Improvements
-  
-- Sensor fault detection  
+   
 - Dirty sensor error detection
-- Fault-specific acoustic warning patterns
 - Additional ultrasonic sensor for curb detection
 - IMU-based tilt-aware warning logic
 - Migration from Arduino Nano to STM32
