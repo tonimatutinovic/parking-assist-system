@@ -72,6 +72,17 @@ The project is being developed as a rapid prototype on Arduino Nano, with a long
 
 ---
 
+## Wiring Diagram
+
+![Wiring diagram](docs/diagrams/wiring_v1.png)
+
+> Note: The diagram uses generic components for visualization.  
+> The actual system uses a UART-based ultrasonic sensor (A02YYUW) instead of a trigger/echo sensor.
+>
+> The system is powered using a 4x AA battery pack (~4.8V) during prototyping.  
+
+---
+
 ## System Behavior
 
 The system operates in real time:
