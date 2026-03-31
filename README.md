@@ -45,6 +45,14 @@ The project is being developed as a rapid prototype on Arduino Nano, with a long
 
 ---
 
+## Hardware Setup
+
+<p align="center">
+  <img src="docs/images/v6_clean_setup.jpg" width="500">
+</p>
+
+---
+
 ## Wiring
 
 ### Ultrasonic Sensor (UART)
@@ -74,7 +82,9 @@ The project is being developed as a rapid prototype on Arduino Nano, with a long
 
 ## Wiring Diagram
 
-![Wiring diagram](docs/diagrams/wiring_v1.png)
+<p align="center">
+  <img src="docs/diagrams/wiring_v1.png" width="550">
+</p>
 
 > Note: The diagram uses generic components for visualization.  
 > The actual system uses a UART-based ultrasonic sensor (A02YYUW) instead of a trigger/echo sensor.
