@@ -6,12 +6,16 @@
   TX_PIN: Not used in this project (sensor transmits automatically)
   BUZZER_PIN: Passive buzzer output pin
   REVERSE PIN: Simulates vehicle reverse gear activation using a push button
+  HC_TRIG_PIN: Trigger output pin used to start measurement
+  HC_ECHO_PIN: Input pin used to measure echo pulse duration
 */
 
 #define RX_PIN 11
 #define TX_PIN 10
 #define BUZZER_PIN 3
 #define REVERSE_PIN 2
+#define HC_TRIG_PIN 5
+#define HC_ECHO_PIN 6
 
 // Special value used to indicate that audio output should be disabled
 #define AUDIO_OFF_INTERVAL 0xFFFFFFFFUL
@@ -123,6 +127,12 @@ float filterBuffer[FILTER_SIZE] = {0};
 int filterIndex = 0;
 bool filterFilled = false;
 
+// Curb detection variables
+float curbDistance = -1.0;                   // Latest filtered curb distance value (cm)
+static float lastValidCurbDistance = -1.0;   // Stores last valid measurement to filter out invalid readings (-1)
+unsigned long lastCurbReadTime = 0;          // Timestamp of last measurement
+const unsigned long CURB_READ_INTERVAL = 50; // Minimum interval between measurements
+
 /*
   Applies moving average filter to incoming distance values
   Reduces noise and prevents rapid fluctuations in measurements
@@ -153,6 +163,32 @@ float applyMovingAverage(float newValue)
     }
 
     return sum / count;
+}
+
+/*
+  Reads distance from HC-SR04 ultrasonic sensor
+
+  Returns:
+    distance in cm
+    -1.0 if no valid echo received (timeout)
+*/
+float readCurbDistanceCm()
+{
+    digitalWrite(HC_TRIG_PIN, LOW);
+    delayMicroseconds(2);
+
+    digitalWrite(HC_TRIG_PIN, HIGH);
+    delayMicroseconds(10);
+    digitalWrite(HC_TRIG_PIN, LOW);
+
+    unsigned long duration = pulseIn(HC_ECHO_PIN, HIGH, 30000);
+
+    if (duration == 0)
+    {
+        return -1.0;
+    }
+
+    return duration * 0.0343 / 2.0;
 }
 
 /*
@@ -575,6 +611,8 @@ void setup()
 
     pinMode(BUZZER_PIN, OUTPUT);        // Configure buzzer pin as output
     pinMode(REVERSE_PIN, INPUT_PULLUP); // Configure reverse input with internal pull-up resistor
+    pinMode(HC_TRIG_PIN, OUTPUT);       // TRIG is output (generating pulse)
+    pinMode(HC_ECHO_PIN, INPUT);        // ECHO is input (measuring pulse width)
 }
 
 void loop()
@@ -639,7 +677,7 @@ void loop()
                 Serial.print("Distance: ");
                 Serial.print(distance);
                 Serial.print(" cm -> Zone: ");
-                Serial.print(currentZone);
+                Serial.println(currentZone);
                 Serial.print("Dirty count: ");
                 Serial.println(distanceJumpCount);
             }
@@ -657,6 +695,30 @@ void loop()
             // Reset buffer for next packet
             indexBuffer = 0;
         }
+    }
+
+    /*
+      Periodic curb sensor measurement
+
+      - Measurement is performed at a fixed interval
+      - Invalid readings (-1) are ignored
+      - Last valid value is preserved for stability
+    */
+    if (millis() - lastCurbReadTime >= CURB_READ_INTERVAL)
+    {
+        lastCurbReadTime = millis();
+
+        float rawCurb = readCurbDistanceCm();
+
+        if (rawCurb > 0)
+        {
+            lastValidCurbDistance = rawCurb;
+        }
+
+        curbDistance = lastValidCurbDistance;
+
+        Serial.print("Curb distance: ");
+        Serial.println(curbDistance);
     }
 
     // Timeout is currently used as the first fault condition.
