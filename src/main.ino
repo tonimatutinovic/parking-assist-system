@@ -133,6 +133,10 @@ static float lastValidCurbDistance = -1.0;   // Stores last valid measurement to
 unsigned long lastCurbReadTime = 0;          // Timestamp of last measurement
 const unsigned long CURB_READ_INTERVAL = 50; // Minimum interval between measurements
 
+// Curb detection configuration
+const float CURB_CRITICAL_THRESHOLD = 30.0; // Distance below which curb is considered dangerous
+bool curbCritical = false;                  // Flag indicating emergency curb proximity
+
 /*
   Applies moving average filter to incoming distance values
   Reduces noise and prevents rapid fluctuations in measurements
@@ -717,6 +721,9 @@ void loop()
 
         curbDistance = lastValidCurbDistance;
 
+        // Triggered only when valid distance is below threshold
+        curbCritical = (curbDistance > 0 && curbDistance < CURB_CRITICAL_THRESHOLD);
+
         Serial.print("Curb distance: ");
         Serial.println(curbDistance);
     }
@@ -768,6 +775,14 @@ void loop()
         return;
 
     case STATE_ACTIVE:
+        if (curbCritical)
+        {
+            audioFrequency = 1800;
+            audioInterval = 40;
+
+            updateAudio();
+            return;
+        }
         updateAudio();
         return;
     }
