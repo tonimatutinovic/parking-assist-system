@@ -137,6 +137,15 @@ const unsigned long CURB_READ_INTERVAL = 50; // Minimum interval between measure
 const float CURB_CRITICAL_THRESHOLD = 30.0; // Distance below which curb is considered dangerous
 bool curbCritical = false;                  // Flag indicating emergency curb proximity
 
+// Curb detection stabilization
+const float CURB_ON_THRESHOLD = 35.0;
+const float CURB_OFF_THRESHOLD = 45.0;
+
+unsigned long curbTriggerTime = 0;
+const unsigned long CURB_MIN_ACTIVE_TIME = 150;
+
+bool curbActive = false;
+
 /*
   Applies moving average filter to incoming distance values
   Reduces noise and prevents rapid fluctuations in measurements
@@ -721,8 +730,35 @@ void loop()
 
         curbDistance = lastValidCurbDistance;
 
-        // Triggered only when valid distance is below threshold
-        curbCritical = (curbDistance > 0 && curbDistance < CURB_CRITICAL_THRESHOLD);
+        // Curb detection with hysteresis and minimum activation time
+        if (curbDistance > 0)
+        {
+            if (!curbActive)
+            {
+                // Activate only if below ON threshold
+                if (curbDistance < CURB_ON_THRESHOLD)
+                {
+                    curbActive = true;
+                    curbTriggerTime = millis();
+                }
+            }
+            else
+            {
+                // Stay active for minimum time
+                if (millis() - curbTriggerTime < CURB_MIN_ACTIVE_TIME)
+                {
+                    // keep active
+                }
+                else
+                {
+                    // Deactivate only if above OFF threshold
+                    if (curbDistance > CURB_OFF_THRESHOLD)
+                    {
+                        curbActive = false;
+                    }
+                }
+            }
+        }
 
         Serial.print("Curb distance: ");
         Serial.println(curbDistance);
@@ -775,7 +811,7 @@ void loop()
         return;
 
     case STATE_ACTIVE:
-        if (curbCritical)
+        if (curbActive)
         {
             audioFrequency = 1800;
             audioInterval = 40;
