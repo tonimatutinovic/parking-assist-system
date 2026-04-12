@@ -134,7 +134,7 @@ unsigned long lastCurbReadTime = 0;          // Timestamp of last measurement
 const unsigned long CURB_READ_INTERVAL = 50; // Minimum interval between measurements
 
 // Curb detection configuration
-const float CURB_CRITICAL_THRESHOLD = 30.0; // Distance below which curb is considered dangerous
+const float CURB_CRITICAL_THRESHOLD = 35.0; // Distance below which curb is considered dangerous
 bool curbCritical = false;                  // Flag indicating emergency curb proximity
 
 // Curb detection stabilization
